@@ -59,7 +59,18 @@ app.use((req, res, next) => {
 });
 
 // 5. Unauthenticated Public Routes
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'Cold Call Copilot API & WebSocket Server',
+    version: '1.0.0',
+    health: '/api/health',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+  });
+});
 app.use('/api', healthRouter);
+app.use('/', healthRouter);
 
 // 6. Authenticated Protected API Routes (Enforces Supabase Auth & PostgreSQL RLS)
 app.use('/api/prospects', requireAuth, prospectsRouter);
