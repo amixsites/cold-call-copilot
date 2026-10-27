@@ -6,6 +6,11 @@ import {
   generateLiveCallAiSuggestions, 
   LiveCallAiSuggestionInput 
 } from '../services/geminiService.js';
+import {
+  generateRealTimeCoaching,
+  CoachingInput,
+  CoachingSuggestion,
+} from '../services/coachingService.js';
 
 export const callsRouter = Router();
 
@@ -1300,4 +1305,203 @@ callsRouter.post('/suggestions', async (req: AuthenticatedRequest, res: Response
 callsRouter.post('/:id/suggestions', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const id = String(req.params.id);
   await handleLiveSuggestions(req, res, id);
+});
+
+// ============================================================================
+// Real-Time LLM Coaching Endpoints & Handlers
+// ============================================================================
+
+// In-memory resilient store for coaching suggestions (offline / fallback mode)
+const fallbackCoaching = new Map<string, CoachingSuggestion[]>();
+
+async function handleCoaching(req: AuthenticatedRequest, res: Response, callId?: string) {
+  try {
+    const supabase = req.supabase;
+    const body = req.body || {};
+    const effectiveCallId = callId || body.callId || 'active-call-session';
+
+    let callData: any = null;
+    if (callId) {
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('calls').select('*').eq('id', callId).single();
+          if (data) callData = data;
+        } catch (_) {}
+      }
+      if (!callData && fallbackCalls.has(callId)) {
+        callData = fallbackCalls.get(callId);
+      }
+    }
+
+    const prospectId = body.prospectId || callData?.prospect_id;
+    let prospectData: any = null;
+    if (prospectId) {
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('prospects').select('*').eq('id', prospectId).single();
+          if (data) prospectData = data;
+        } catch (_) {}
+      }
+    }
+
+    // Load recent transcript segments
+    let segments: any[] = [];
+    if (Array.isArray(body.recentSegments) && body.recentSegments.length > 0) {
+      segments = body.recentSegments;
+    } else if (callId) {
+      if (supabase) {
+        try {
+          const { data: dbSegments } = await supabase
+            .from('call_transcript_segments')
+            .select('*')
+            .eq('call_id', callId)
+            .order('created_at', { ascending: true })
+            .limit(15);
+          if (dbSegments && dbSegments.length > 0) {
+            segments = dbSegments.map(toFrontendTranscriptSegment);
+          }
+        } catch (_) {}
+      }
+      if (segments.length === 0 && fallbackTranscripts.has(callId)) {
+        segments = (fallbackTranscripts.get(callId) || []).map(toFrontendTranscriptSegment);
+      }
+    }
+
+    // Format events
+    let formattedEvents: any[] = [];
+    if (Array.isArray(body.stageEvents)) {
+      formattedEvents = body.stageEvents;
+    } else if (callId) {
+      if (supabase) {
+        try {
+          const { data: dbEvents } = await supabase
+            .from('stage_events')
+            .select('*')
+            .eq('call_id', callId)
+            .order('created_at', { ascending: true });
+          if (dbEvents && dbEvents.length > 0) {
+            formattedEvents = dbEvents.map(toFrontendEvent);
+          }
+        } catch (_) {}
+      }
+      if (formattedEvents.length === 0 && fallbackEvents.has(callId)) {
+        formattedEvents = (fallbackEvents.get(callId) || []).map(toFrontendEvent);
+      }
+    }
+
+    if (segments.length === 0 && (body.latestStatement || body.prospectWords)) {
+      const text = String(body.latestStatement || body.prospectWords).trim();
+      const speaker = body.latestSpeaker || 'prospect';
+      segments = [{ speaker, text, timestamp: new Date().toISOString() }];
+    }
+
+    const activeStage = Math.max(1, Math.min(8, Number(body.activeStage || callData?.active_stage || 1)));
+
+    const coachingInput: CoachingInput = {
+      callId: effectiveCallId,
+      companyName: body.companyName || callData?.company_name || prospectData?.company_name || 'Manufacturing Target',
+      contactName: body.contactName || callData?.contact_name || prospectData?.contact_name,
+      industry: body.industry || prospectData?.industry,
+      manufacturingType: body.manufacturingType || prospectData?.manufacturing_type,
+      prospectNotes: body.prospectNotes || prospectData?.notes,
+      activeStage,
+      stageName: body.stageName || LIVE_STAGE_NAMES[activeStage] || `Stage ${activeStage}`,
+      callObjective: body.callObjective || callData?.call_objective,
+      latestStatement: body.latestStatement,
+      latestSpeaker: body.latestSpeaker,
+      recentSegments: segments,
+      prospectWords: body.prospectWords !== undefined ? String(body.prospectWords) : (callData?.prospect_words || ''),
+      quoteStatus: body.quoteStatus !== undefined ? String(body.quoteStatus) : (callData?.quote_status || 'not_reached'),
+      stageEvents: formattedEvents,
+      stageNotes: body.stageNotes || callData?.stage_notes || {},
+      sourceSegmentId: body.sourceSegmentId,
+    };
+
+    const coaching = await generateRealTimeCoaching(coachingInput);
+
+    // Persist to Supabase if available
+    if (supabase && callId) {
+      try {
+        await supabase.from('call_coaching_suggestions').insert({
+          call_id: callId,
+          user_id: req.user?.id || null,
+          stage_number: activeStage,
+          suggested_response: coaching.suggested_response,
+          detected_intent: coaching.detected_intent,
+          objection: coaching.objection,
+          buying_signals: coaching.buying_signals,
+          follow_up_question: coaching.follow_up_question,
+          recommended_action: coaching.recommended_action,
+          confidence: coaching.confidence,
+          source_segment_id: coaching.sourceSegmentId || null,
+          model_used: coaching.modelUsed,
+        });
+      } catch (dbErr) {
+        console.warn('[handleCoaching] Supabase insert warning (retaining in-memory fallback):', dbErr);
+      }
+    }
+
+    // Always update fallback map
+    const existing = fallbackCoaching.get(effectiveCallId) || [];
+    fallbackCoaching.set(effectiveCallId, [...existing, coaching]);
+
+    res.status(200).json({
+      success: true,
+      data: coaching,
+    });
+  } catch (err: any) {
+    console.error('Failed to generate real-time coaching:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to generate real-time coaching' });
+  }
+}
+
+// POST /api/calls/coaching - Real-time coaching without saved call ID (pre-call or initial)
+callsRouter.post('/coaching', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  await handleCoaching(req, res);
+});
+
+// POST /api/calls/:id/coaching - Real-time coaching for active call
+callsRouter.post('/:id/coaching', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  await handleCoaching(req, res, id);
+});
+
+// GET /api/calls/:id/coaching - Retrieve coaching history for call
+callsRouter.get('/:id/coaching', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  const supabase = req.supabase;
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('call_coaching_suggestions')
+        .select('*')
+        .eq('call_id', id)
+        .order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        res.status(200).json({
+          success: true,
+          data: data.map((d: any) => ({
+            id: d.id,
+            callId: d.call_id,
+            suggested_response: d.suggested_response,
+            detected_intent: d.detected_intent,
+            objection: d.objection,
+            buying_signals: d.buying_signals || [],
+            follow_up_question: d.follow_up_question,
+            recommended_action: d.recommended_action,
+            confidence: Number(d.confidence || 0.85),
+            stageNumber: d.stage_number,
+            sourceSegmentId: d.source_segment_id,
+            modelUsed: d.model_used,
+            createdAt: d.created_at,
+          })),
+        });
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const inMemory = fallbackCoaching.get(id) || [];
+  res.status(200).json({ success: true, data: inMemory });
 });

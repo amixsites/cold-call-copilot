@@ -42,6 +42,7 @@ import {
   FollowUpPriority,
   LiveCallAiSuggestionPayload,
   LiveTranscriptSegment,
+  RealTimeCoachingSuggestion,
   RecognitionStatus,
 } from '../types';
 import { useData } from '../context/DataContext';
@@ -129,12 +130,23 @@ export const CallWorkspacePage: React.FC = () => {
   const [isEndingCall, setIsEndingCall] = useState<boolean>(false);
   const [lastCompletedCall, setLastCompletedCall] = useState<CallRecord | null>(null);
 
-  // AI Suggestions Panel State
+  // AI Suggestions Panel State (Legacy)
   const [aiSuggestions, setAiSuggestions] = useState<LiveCallAiSuggestionPayload | null>(null);
-  const [isLoadingAi, setIsLoadingAi] = useState<boolean>(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [_isLoadingAi, setIsLoadingAi] = useState<boolean>(false);
+  const [_aiError, setAiError] = useState<string | null>(null);
   const [isMobileAiOpen, setIsMobileAiOpen] = useState<boolean>(false);
   const aiAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Real-Time AI Coaching State
+  const [coachingSuggestion, setCoachingSuggestion] = useState<RealTimeCoachingSuggestion | null>(null);
+  const [isLoadingCoaching, setIsLoadingCoaching] = useState<boolean>(false);
+  const [coachingError, setCoachingError] = useState<string | null>(null);
+  const [coachingLastUpdated, setCoachingLastUpdated] = useState<string | null>(null);
+  const [coachingCooldown, setCoachingCooldown] = useState<boolean>(false);
+  const coachingRequestIdRef = useRef<number>(0);
+  const coachingDebounceTimerRef = useRef<any>(null);
+  const lastProcessedTranscriptIdRef = useRef<string | null>(null);
+  const fetchRealTimeCoachingRef = useRef<((options?: { force?: boolean; triggerSegment?: LiveTranscriptSegment }) => Promise<void>) | null>(null);
   // Live Speech Recognition & Transcript State
   const [transcriptSegments, setTranscriptSegments] = useState<LiveTranscriptSegment[]>([]);
   const [interimTranscript, setInterimTranscript] = useState<string>('');
@@ -340,7 +352,86 @@ export const CallWorkspacePage: React.FC = () => {
 
   const triggerDebouncedAiRefresh = useCallback(() => {}, []);
 
-  // Load saved transcript segments when call is active
+  // Real-Time AI Coaching fetcher
+  const fetchRealTimeCoaching = useCallback(async (options?: { force?: boolean; triggerSegment?: LiveTranscriptSegment }) => {
+    const currentCallId = activeCallId || activeCallIdRef.current;
+    if (!currentCallId) return;
+
+    // Rate limiting cooldown check unless forced by user click
+    if (!options?.force && coachingCooldown) {
+      return;
+    }
+
+    const requestId = ++coachingRequestIdRef.current;
+    setIsLoadingCoaching(true);
+    setCoachingError(null);
+
+    // Apply 2.5s cooldown to prevent flood
+    setCoachingCooldown(true);
+    setTimeout(() => setCoachingCooldown(false), 2500);
+
+    try {
+      const currentStageDef = getStageConfig(activeStage);
+      const stageName = currentStageDef?.name || `Stage ${activeStage}`;
+
+      const recentHistory = transcriptSegments.slice(-8);
+
+      const result = await api.calls.requestCoaching(currentCallId, {
+        callId: currentCallId,
+        companyName: selectedProspect?.companyName || 'Target Company',
+        contactName: selectedProspect?.contactName,
+        industry: selectedProspect?.industry,
+        manufacturingType: selectedProspect?.manufacturingType,
+        prospectNotes: selectedProspect?.notes,
+        activeStage,
+        stageName,
+        callObjective: callObjective || currentStageDef?.purpose,
+        recentSegments: recentHistory.map(s => ({
+          speaker: s.speaker,
+          text: s.text,
+          timestamp: s.timestamp,
+          segmentId: s.segmentId || s.id,
+        })),
+        stageEvents: stageEvents.filter(e => e.stageNumber === activeStage),
+        stageNotes,
+        prospectWords,
+        quoteStatus,
+        sourceSegmentId: options?.triggerSegment?.segmentId || options?.triggerSegment?.id,
+      });
+
+      // Guard against stale asynchronous responses
+      if (requestId === coachingRequestIdRef.current && result) {
+        setCoachingSuggestion(result);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setCoachingLastUpdated(timeStr);
+      }
+    } catch (err: any) {
+      if (requestId === coachingRequestIdRef.current) {
+        console.warn('Real-time coaching request notice:', err);
+        setCoachingError(err?.message || 'Unable to generate coaching suggestion at this moment.');
+      }
+    } finally {
+      if (requestId === coachingRequestIdRef.current) {
+        setIsLoadingCoaching(false);
+      }
+    }
+  }, [
+    activeCallId,
+    coachingCooldown,
+    selectedProspect,
+    activeStage,
+    callObjective,
+    transcriptSegments,
+    stageNotes,
+    stageEvents,
+  ]);
+
+  // Keep ref up to date
+  useEffect(() => {
+    fetchRealTimeCoachingRef.current = fetchRealTimeCoaching;
+  }, [fetchRealTimeCoaching]);
+
+  // Load saved transcript segments and coaching suggestion when call is active
   useEffect(() => {
     if (activeCallId) {
       api.calls.getTranscript(activeCallId)
@@ -350,17 +441,41 @@ export const CallWorkspacePage: React.FC = () => {
           }
         })
         .catch(err => console.warn('Could not load call transcripts:', err));
+
+      api.calls.getCoaching(activeCallId)
+        .then(cached => {
+          if (cached) {
+            setCoachingSuggestion(cached);
+            setCoachingLastUpdated('Restored from call');
+          }
+        })
+        .catch(err => console.warn('Could not load call coaching cache:', err));
     }
   }, [activeCallId]);
 
-  // Cleanup speech adapter on unmount
+  // Cleanup speech adapter and coaching timers on unmount
   useEffect(() => {
     return () => {
       speechAdapterRef.current?.destroy();
       if (aiDebounceTimerRef.current) clearTimeout(aiDebounceTimerRef.current);
       if (aiAbortControllerRef.current) aiAbortControllerRef.current.abort();
+      if (coachingDebounceTimerRef.current) clearTimeout(coachingDebounceTimerRef.current);
     };
   }, []);
+
+  // Insert suggested response into active call notes
+  const handleInsertSuggestionIntoNotes = useCallback((text: string) => {
+    setStageNotes(prev => {
+      const current = prev[activeStage] || '';
+      const separator = current.trim().length > 0 ? '\n' : '';
+      const updated = {
+        ...prev,
+        [activeStage]: `${current}${separator}[AI Coach]: "${text}"`,
+      };
+      return updated;
+    });
+    triggerDebouncedAutoSave();
+  }, [activeStage, triggerDebouncedAutoSave]);
 
   // Active Call ID Ref to prevent stale closures in async WebSocket listeners
   const activeCallIdRef = useRef<string | null>(activeCallId);
@@ -388,6 +503,21 @@ export const CallWorkspacePage: React.FC = () => {
 
       return updated;
     });
+
+    // Trigger debounced real-time coaching for meaningful statements
+    const cleanText = segment.text.trim();
+    const words = cleanText.split(/\s+/).filter(Boolean);
+    const isMeaningful = words.length >= 2 && !/^(ok|yeah|yes|no|hello|hi|um|uh|right)\.?$/i.test(cleanText);
+
+    if (isMeaningful && segment.segmentId !== lastProcessedTranscriptIdRef.current) {
+      lastProcessedTranscriptIdRef.current = segment.segmentId;
+      if (coachingDebounceTimerRef.current) {
+        clearTimeout(coachingDebounceTimerRef.current);
+      }
+      coachingDebounceTimerRef.current = setTimeout(() => {
+        fetchRealTimeCoachingRef.current?.({ triggerSegment: segment });
+      }, 1000);
+    }
   }, [activeCallId]);
 
   const onFinalSegmentRef = useRef<(seg: LiveTranscriptSegment) => void>(handleFinalTranscriptSegment);
@@ -529,6 +659,10 @@ export const CallWorkspacePage: React.FC = () => {
       setTranscriptSegments([]);
       setInterimTranscript('');
       setLastCompletedCall(null);
+      setCoachingSuggestion(null);
+      setCoachingError(null);
+      setCoachingLastUpdated(null);
+      lastProcessedTranscriptIdRef.current = null;
       setSaveState('saved');
       setCallLifecycleState('active'); // Swapping to Call Mode immediately
       setSaveSuccessMessage('Call session started. Live Focus Mode active.');
@@ -576,6 +710,7 @@ export const CallWorkspacePage: React.FC = () => {
       }
     });
     fetchSuggestions(stageNum);
+    fetchRealTimeCoachingRef.current?.({ force: true });
     if (callStatus === 'In Progress') {
       await persistCallState({
         activeStage: stageNum,
@@ -607,6 +742,7 @@ export const CallWorkspacePage: React.FC = () => {
       });
 
       fetchSuggestions(nextStage, stageEvents, prospectWords, nextQuoteStatus);
+      fetchRealTimeCoachingRef.current?.({ force: true });
 
       if (callStatus === 'In Progress') {
         await persistCallState({
@@ -1177,14 +1313,18 @@ export const CallWorkspacePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSecondaryRailTab('ai')}
-                  className={`flex items-center justify-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer text-center ${
+                  className={`flex items-center justify-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer text-center ${
                     secondaryRailTab === 'ai'
                       ? 'bg-white text-indigo-700 shadow-3xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <span>AI Copilot</span>
-                  {isLoadingAi && <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />}
+                  <Sparkles className="w-3 h-3 text-indigo-600" />
+                  <span>AI Live Coach</span>
+                  {isLoadingCoaching && <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />}
+                  {coachingSuggestion && !isLoadingCoaching && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  )}
                 </button>
               </div>
             </div>
@@ -1210,6 +1350,50 @@ export const CallWorkspacePage: React.FC = () => {
                       {currentStageConfig.purpose}
                     </p>
                   </div>
+
+                  {/* Real-Time Live Coaching Quick-Bar if Available */}
+                  {coachingSuggestion && (
+                    <div className="bg-gradient-to-r from-indigo-50/90 via-purple-50/40 to-indigo-50/60 border border-indigo-200/90 rounded-lg p-2.5 shadow-3xs flex items-start justify-between gap-2 animate-in fade-in">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 bg-white border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            AI Coach Suggestion
+                          </span>
+                          {coachingSuggestion.objection && (
+                            <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded truncate">
+                              Objection: {coachingSuggestion.objection}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs font-semibold text-slate-900 leading-snug">
+                          "{coachingSuggestion.suggested_response}"
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (coachingSuggestion.suggested_response) {
+                              navigator.clipboard.writeText(coachingSuggestion.suggested_response);
+                            }
+                          }}
+                          className="px-2 py-1 text-[11px] font-bold rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 cursor-pointer shadow-3xs"
+                          title="Copy suggested response"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSecondaryRailTab('ai')}
+                          className="px-2 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-3xs"
+                          title="Open full AI Coach panel"
+                        >
+                          Details
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Quick Actions (Action Taps) — PRIMARY FOCUS */}
                   <div className="bg-white border border-slate-200/90 rounded-lg p-3 sm:p-3.5 shadow-3xs">
@@ -1351,12 +1535,16 @@ export const CallWorkspacePage: React.FC = () => {
               </>
             ) : (
               <AiSuggestionsPanel
+                coachingSuggestion={coachingSuggestion}
                 suggestions={aiSuggestions}
-                isLoading={isLoadingAi}
-                error={aiError}
-                onRefresh={() => fetchSuggestions(activeStage)}
+                isLoading={isLoadingCoaching}
+                error={coachingError}
+                onRefresh={() => fetchRealTimeCoachingRef.current?.({ force: true })}
+                onInsertIntoNotes={handleInsertSuggestionIntoNotes}
                 activeStage={activeStage}
                 activeStageName={currentStageConfig.shortName}
+                lastUpdated={coachingLastUpdated}
+                refreshCooldown={coachingCooldown}
                 className="flex-1 min-h-0"
               />
             )}
@@ -1404,13 +1592,14 @@ export const CallWorkspacePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setSecondaryRailTab('ai')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                       secondaryRailTab === 'ai'
                         ? 'bg-white text-indigo-700 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    AI Copilot
+                    <Sparkles className="w-3 h-3 text-indigo-600" />
+                    <span>AI Coach</span>
                   </button>
                 </div>
                 <button
@@ -1426,12 +1615,16 @@ export const CallWorkspacePage: React.FC = () => {
               <div className="flex-1 min-h-0 p-3 overflow-hidden flex flex-col">
                 {secondaryRailTab === 'ai' ? (
                   <AiSuggestionsPanel
+                    coachingSuggestion={coachingSuggestion}
                     suggestions={aiSuggestions}
-                    isLoading={isLoadingAi}
-                    error={aiError}
-                    onRefresh={() => fetchSuggestions(activeStage)}
+                    isLoading={isLoadingCoaching}
+                    error={coachingError}
+                    onRefresh={() => fetchRealTimeCoachingRef.current?.({ force: true })}
+                    onInsertIntoNotes={handleInsertSuggestionIntoNotes}
                     activeStage={activeStage}
                     activeStageName={currentStageConfig.shortName}
+                    lastUpdated={coachingLastUpdated}
+                    refreshCooldown={coachingCooldown}
                     isMobileDrawer={true}
                     onCloseMobileDrawer={() => setIsMobileAiOpen(false)}
                     className="h-full"

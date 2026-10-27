@@ -310,4 +310,43 @@ export interface LiveCallAiSuggestionInput {
   stageNotes?: Record<number, string>;
 }
 
+// ============================================================================
+// Real-Time LLM Coaching Types
+// ============================================================================
+
+export interface RealTimeCoachingSuggestion {
+  id?: string;
+  callId?: string;
+  suggested_response: string;
+  detected_intent: string;
+  objection: string | null;
+  buying_signals: string[];
+  follow_up_question: string;
+  recommended_action: string;
+  confidence: number;
+  stageNumber?: number;
+  sourceSegmentId?: string;
+  modelUsed?: string;
+  createdAt?: string;
+}
+
+export interface RealTimeCoachingInput {
+  callId: string;
+  companyName: string;
+  contactName?: string;
+  industry?: string;
+  manufacturingType?: string;
+  prospectNotes?: string;
+  activeStage: CallStageNumber;
+  stageName: string;
+  callObjective?: string;
+  recentSegments: Array<{ speaker?: string; text: string; timestamp?: string; segmentId?: string }>;
+  prospectWords?: string;
+  quoteStatus?: string;
+  stageEvents?: Array<{ stageNumber: number; eventType: string; eventLabel?: string; timestamp?: string }>;
+  stageNotes?: Record<number, string>;
+  sourceSegmentId?: string;
+}
+
+
 

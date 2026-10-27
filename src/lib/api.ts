@@ -7,6 +7,8 @@ import {
   LiveCallAiSuggestionPayload,
   LiveCallAiSuggestionInput,
   LiveTranscriptSegment,
+  RealTimeCoachingSuggestion,
+  RealTimeCoachingInput,
 } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
@@ -184,6 +186,16 @@ export const api = {
         signal,
       });
     },
+    getCoaching: (callId: string) =>
+      request<RealTimeCoachingSuggestion | null>(`/api/calls/${callId}/coaching`),
+    requestCoaching: (callId: string, data?: Partial<RealTimeCoachingInput>, signal?: AbortSignal) => {
+      const endpoint = callId ? `/api/calls/${callId}/coaching` : '/api/calls/coaching';
+      return request<RealTimeCoachingSuggestion>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(data || {}),
+        signal,
+      });
+    },
     getTranscript: (callId: string) =>
       request<LiveTranscriptSegment[]>(`/api/calls/${callId}/transcript`),
     addTranscriptSegment: (callId: string, segment: Partial<LiveTranscriptSegment> & { text: string }) =>
@@ -199,6 +211,12 @@ export const api = {
       request<{ status: string; configured: boolean; model: string; provider: string; message: string }>('/api/ai/health'),
     callAssist: (data: Partial<LiveCallAiSuggestionInput>, signal?: AbortSignal) =>
       request<LiveCallAiSuggestionPayload>('/api/ai/call-assist', {
+        method: 'POST',
+        body: JSON.stringify(data || {}),
+        signal,
+      }),
+    requestCoaching: (data: Partial<RealTimeCoachingInput>, signal?: AbortSignal) =>
+      request<RealTimeCoachingSuggestion>('/api/calls/coaching', {
         method: 'POST',
         body: JSON.stringify(data || {}),
         signal,
