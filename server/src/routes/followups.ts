@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { AuthenticatedRequest } from '../middleware/auth.js';
+import { AuthenticatedRequest, getDefaultUserId } from '../middleware/auth.js';
 
 export const followUpsRouter = Router();
 
@@ -155,7 +155,7 @@ followUpsRouter.post('/', async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const trimmedTask = String(body.task).trim();
 
     if (!supabase) {
@@ -247,7 +247,7 @@ followUpsRouter.patch('/:id', async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const updateData = toDbFollowUp(body, userId);
     delete updateData.user_id;
 

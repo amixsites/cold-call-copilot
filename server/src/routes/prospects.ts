@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import crypto from 'crypto';
-import { AuthenticatedRequest } from '../middleware/auth.js';
+import { AuthenticatedRequest, getDefaultUserId } from '../middleware/auth.js';
 
 export const prospectsRouter = Router();
 
@@ -162,7 +162,7 @@ prospectsRouter.post('/', async (req: AuthenticatedRequest, res: Response): Prom
     }
 
     const prospectId = body.id || crypto.randomUUID();
-    const userId = req.user?.id && UUID_REGEX.test(req.user.id) ? req.user.id : '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id && UUID_REGEX.test(req.user.id) ? req.user.id : getDefaultUserId();
     const insertData: Record<string, any> = { id: prospectId, ...toDbProspect(body, userId) };
 
     const now = new Date().toISOString();
@@ -231,7 +231,7 @@ prospectsRouter.patch('/:id', async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const userId = req.user?.id && UUID_REGEX.test(req.user.id) ? req.user.id : '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id && UUID_REGEX.test(req.user.id) ? req.user.id : getDefaultUserId();
     const updateData = toDbProspect(body, userId);
     delete updateData.user_id; // Never reassign user_id
 

@@ -10,14 +10,23 @@ export interface AuthenticatedRequest extends Request {
   supabase?: SupabaseClient;
 }
 
-const defaultDemoUser: User = {
-  id: '00000000-0000-0000-0000-000000000001',
-  email: 'demo@coldcallcopilot.io',
-  app_metadata: {},
-  user_metadata: { full_name: 'Sales Representative' },
-  aud: 'authenticated',
-  created_at: new Date().toISOString(),
-} as unknown as User;
+// Valid seed user from Supabase auth.users to satisfy foreign key constraints
+export let defaultDemoUserId = 'c28f9889-a2d9-42b0-8b7b-4248c1d91109';
+
+export function getDefaultUserId(): string {
+  return defaultDemoUserId;
+}
+
+export function getDemoUser(): User {
+  return {
+    id: defaultDemoUserId,
+    email: 'sales.rep@precisionparts.com',
+    app_metadata: {},
+    user_metadata: { full_name: 'Sales Representative' },
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+  } as unknown as User;
+}
 
 // Master auth client using anon key for token verification
 const authClient = config.supabaseAnonKey
@@ -26,6 +35,21 @@ const authClient = config.supabaseAnonKey
       realtime: { transport: WebSocket as any },
     })
   : null;
+
+// Dynamically fetch first valid user from auth.users on launch if service role key available
+if (config.supabaseServiceRoleKey) {
+  try {
+    const admin = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+      auth: { persistSession: false },
+      realtime: { transport: WebSocket as any },
+    });
+    admin.auth.admin.listUsers({ perPage: 1 }).then(({ data, error }) => {
+      if (!error && data?.users?.length) {
+        defaultDemoUserId = data.users[0].id;
+      }
+    }).catch(() => {});
+  } catch (_) {}
+}
 
 export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
@@ -76,7 +100,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   }
 
   // Gracefully attach demo user context without blocking with auth errors
-  req.user = defaultDemoUser;
+  req.user = getDemoUser();
   req.token = token || 'demo_token';
 
   // Use service role key on backend to ensure persistent database operations

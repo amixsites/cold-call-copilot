@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import crypto from 'crypto';
-import { AuthenticatedRequest } from '../middleware/auth.js';
+import { AuthenticatedRequest, getDefaultUserId } from '../middleware/auth.js';
 import { 
   generateCallAiReview, 
   generateLiveCallAiSuggestions, 
@@ -405,7 +405,7 @@ callsRouter.post('/', async (req: AuthenticatedRequest, res: Response): Promise<
       return;
     }
 
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const insertData = toDbCall(body, userId);
     
     // Ensure genuine UUID ID
@@ -510,7 +510,7 @@ callsRouter.patch('/:id', async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const updateData = toDbCall(body, userId);
     delete updateData.user_id;
     updateData.updated_at = new Date().toISOString();
@@ -654,7 +654,7 @@ callsRouter.post('/:id/events', async (req: AuthenticatedRequest, res: Response)
     }
 
     const eventLabel = String(body.eventLabel || body.label || eventKey).trim();
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const eventId = body.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.id)
       ? String(body.id)
       : crypto.randomUUID();
@@ -841,7 +841,7 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
   try {
     const supabase = req.supabase;
     const id = String(req.params.id);
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
     const body = req.body || {};
 
     // Support single segment or array of segments
@@ -862,10 +862,20 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
       const text = String(seg.text || '').trim();
       if (!text) continue;
 
-      const speaker = String(seg.speaker || 'unknown');
+      const rawSpeaker = String(seg.speaker || 'unknown');
       const isFinal = seg.isFinal !== undefined ? Boolean(seg.isFinal) : true;
       const timestamp = String(seg.timestamp || new Date().toISOString());
       const nowIso = new Date().toISOString();
+
+      // Check if existing segment was manually corrected to avoid automatic overwrite
+      const existingSeg = currentSegments.find((s: any) => s.segment_id === segmentId || s.id === segmentId);
+      const isManual = existingSeg?.speaker_source === 'manual';
+      const speaker = isManual && (!seg.speaker_source || seg.speaker_source === 'automatic')
+        ? existingSeg.speaker
+        : rawSpeaker;
+      const speakerSource = isManual && (!seg.speaker_source || seg.speaker_source === 'automatic')
+        ? 'manual'
+        : (seg.speaker_source || 'automatic');
 
       const newSegmentRecord: FallbackTranscriptSegment = {
         id: crypto.randomUUID(),
@@ -874,6 +884,7 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
         segment_id: segmentId,
         text,
         speaker,
+        speaker_source: speakerSource,
         is_final: isFinal,
         timestamp,
         created_at: nowIso,
@@ -881,24 +892,35 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
 
       if (supabase) {
         try {
-          const { data, error } = await supabase
+          const upsertPayload: Record<string, any> = {
+            call_id: id,
+            user_id: userId,
+            segment_id: segmentId,
+            text,
+            speaker,
+            is_final: isFinal,
+            timestamp,
+            created_at: nowIso,
+          };
+
+          let res = await supabase
             .from('call_transcript_segments')
             .upsert(
-              {
-                call_id: id,
-                user_id: userId,
-                segment_id: segmentId,
-                text,
-                speaker,
-                speaker_source: seg.speaker_source || 'automatic',
-                is_final: isFinal,
-                timestamp,
-                created_at: nowIso,
-              },
+              { ...upsertPayload, speaker_source: speakerSource },
               { onConflict: 'call_id,segment_id' }
             )
             .select()
             .single();
+
+          if (res.error && (res.error.message?.includes('speaker_source') || res.error.details?.includes('speaker_source'))) {
+            res = await supabase
+              .from('call_transcript_segments')
+              .upsert(upsertPayload, { onConflict: 'call_id,segment_id' })
+              .select()
+              .single();
+          }
+
+          const { data, error } = res;
 
           if (!error && data) {
             savedSegments.push(toFrontendTranscriptSegment(data));
@@ -1039,7 +1061,7 @@ callsRouter.post('/:id/review', async (req: AuthenticatedRequest, res: Response)
   try {
     const supabase = req.supabase;
     const id = String(req.params.id);
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000001';
+    const userId = req.user?.id || getDefaultUserId();
 
     // 1. Fetch Call Record
     let callData: any = null;
