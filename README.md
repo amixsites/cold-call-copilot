@@ -165,3 +165,28 @@ Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/) in your web browser.
 npm run build
 ```
 The build executes `tsc` (TypeScript compiler) followed by `vite build`. Both complete with **0 errors**.
+
+---
+
+## 6. Vercel Deployment & Environment Variables
+
+This application is fully pre-configured for one-click deployment on **Vercel** with SPA rewrites (`vercel.json`) and TypeScript compilation.
+
+### Step 1: Deploy to Vercel
+1. Go to [vercel.com](https://vercel.com/) and click **Add New Project**.
+2. Import the GitHub repository: `amixsites/cold-call-copilot`.
+3. Framework Preset: **Vite** (auto-detected).
+4. Build Command: `npm run build` (auto-detected).
+5. Output Directory: `dist` (auto-detected).
+
+### Step 2: Configure Environment Variables
+Under **Settings → Environment Variables** in the Vercel dashboard, add the following variables:
+
+| Variable Name | Description | Example / Default |
+| :--- | :--- | :--- |
+| `VITE_SUPABASE_URL` | Your Supabase project URL | `https://rduxyhkwgykejczxircd.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | Supabase Anon / Public API Key | `eyJhbGciOiJIUzI1NiIsIn...` |
+| `VITE_API_BASE_URL` | Express backend URL (Render, Railway, Fly.io, VPS) | `https://your-backend.railway.app` |
+
+### Step 3: Deploy
+Click **Deploy**. Vercel will compile the TypeScript application, optimize assets, and deploy the application to your live `.vercel.app` URL.
