@@ -1,0 +1,45 @@
+{
+  "name": "cold-call-copilot",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "server:dev": "npm run dev --prefix server",
+    "server:build": "npm run build --prefix server",
+    "server:start": "npm run start --prefix server",
+    "server:test": "npm run test --prefix server",
+    "test": "npx --yes tsx test/phase2_workspace.test.ts && npx --yes tsx test/phase3_persistence.test.ts && npx --yes tsx test/phase4_features.test.ts && npx --yes tsx test/phase4_focus_mode.test.ts && npx --yes tsx test/phase4_redesign_workspace.test.ts && npx --yes tsx test/speaker_alternation_heuristic.test.ts && npx --yes tsx test/phase5_compact_workspace.test.ts",
+    "server:fastapi": "python -m uvicorn server.src.fastapi_app:app --port 8000 --reload",
+    "test:gemini-live": "npx --yes tsx server/test/live_transcription_ws.test.ts",
+    "test:phase2": "npx --yes tsx test/phase2_workspace.test.ts",
+    "test:phase3": "npx --yes tsx test/phase3_persistence.test.ts",
+    "test:phase4": "npx --yes tsx test/phase4_features.test.ts",
+    "test:phase4.1": "npx --yes tsx test/phase4_focus_mode.test.ts",
+    "test:redesign": "npx --yes tsx test/phase4_redesign_workspace.test.ts",
+    "test:speaker-heuristic": "npx --yes tsx test/speaker_alternation_heuristic.test.ts",
+    "test:phase5": "npx --yes tsx test/phase5_compact_workspace.test.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.29.0",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
