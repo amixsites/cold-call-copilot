@@ -32,6 +32,7 @@ export interface AiSuggestionsPanelProps {
   className?: string;
   lastUpdated?: string | null;
   refreshCooldown?: boolean;
+  statusMessage?: string;
 }
 
 export const AiSuggestionsPanel: React.FC<AiSuggestionsPanelProps> = ({
@@ -48,6 +49,7 @@ export const AiSuggestionsPanel: React.FC<AiSuggestionsPanelProps> = ({
   className = '',
   lastUpdated,
   refreshCooldown = false,
+  statusMessage,
 }) => {
   const [copiedResponse, setCopiedResponse] = useState(false);
   const [copiedFollowUp, setCopiedFollowUp] = useState(false);
@@ -97,7 +99,7 @@ export const AiSuggestionsPanel: React.FC<AiSuggestionsPanelProps> = ({
               {isLoading ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-800">
                   <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                  Analyzing
+                  {statusMessage || 'Analyzing'}
                 </span>
               ) : coachingSuggestion ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">
@@ -208,6 +210,14 @@ export const AiSuggestionsPanel: React.FC<AiSuggestionsPanelProps> = ({
         {/* Active Coaching Suggestion Content */}
         {coachingSuggestion && (
           <div className="space-y-3 animate-in fade-in duration-200">
+            {/* Non-blocking Re-analyzing Notice */}
+            {isLoading && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50/90 border border-amber-200/80 text-amber-900 text-xs animate-in fade-in">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 shrink-0" />
+                <span className="font-semibold">{statusMessage || 'Re-analyzing conversation...'}</span>
+              </div>
+            )}
+
             {/* Primary Suggested Response Card */}
             <div className="p-3.5 sm:p-4 rounded-xl border border-indigo-200/90 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/30 shadow-xs space-y-2.5">
               <div className="flex items-center justify-between gap-2">

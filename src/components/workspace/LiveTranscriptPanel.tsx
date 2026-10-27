@@ -14,6 +14,7 @@ import {
   Activity,
   WifiOff,
   ChevronDown,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { LiveTranscriptSegment, RecognitionStatus } from '../../types';
 // gemini-3.5-transcribe-live streaming pipeline via GeminiLiveAudioClient
@@ -276,27 +277,49 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
                   : 'bg-slate-50/70 border-slate-200/80 hover:border-slate-300'
               } group`}
             >
-              {/* Segment Metadata & Subtle Speaker Tag */}
+              {/* Segment Metadata & Speaker Tag with Compact Switch Control */}
               <div className="flex items-center justify-between gap-2 mb-1">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onToggleSpeaker) {
-                        const nextSpeaker = isProspect ? 'agent' : 'prospect';
-                        onToggleSpeaker(seg.id || seg.segmentId, nextSpeaker);
-                      }
-                    }}
-                    title="Click to toggle speaker (Agent ↔ Prospect)"
-                    className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition-colors ${
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Current Speaker Badge */}
+                  <span
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
                       isProspect
-                        ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
-                        : 'bg-indigo-100 text-indigo-800 border-indigo-300 hover:bg-indigo-200'
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : 'bg-indigo-100 text-indigo-800 border-indigo-300'
                     }`}
                   >
                     <User className="w-2.5 h-2.5" />
                     <span>{isProspect ? 'Prospect' : 'Agent'}</span>
-                  </button>
+                  </span>
+
+                  {/* Compact Speaker Switch Button */}
+                  {onToggleSpeaker && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextSpeaker = isProspect ? 'agent' : 'prospect';
+                        onToggleSpeaker(seg.id || seg.segmentId, nextSpeaker);
+                      }}
+                      title={isProspect ? 'Switch to Agent' : 'Switch to Prospect'}
+                      aria-label={isProspect ? 'Switch to Agent' : 'Switch to Prospect'}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-600 hover:text-indigo-700 bg-white hover:bg-indigo-50/70 border border-slate-200/90 hover:border-indigo-300 transition-colors shadow-3xs cursor-pointer"
+                    >
+                      <ArrowLeftRight className="w-2.5 h-2.5 text-slate-500" />
+                      <span className="hidden sm:inline">
+                        {isProspect ? 'Switch to Agent' : 'Switch to Prospect'}
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Manual Correction Marker */}
+                  {(seg.speaker_source === 'manual' || seg.is_manual) && (
+                    <span
+                      className="text-[9px] font-semibold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200/70"
+                      title="Manually corrected speaker attribution"
+                    >
+                      Manual
+                    </span>
+                  )}
 
                   {timeFormatted && (
                     <span className="text-[10px] text-slate-400 font-mono">

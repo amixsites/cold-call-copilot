@@ -270,10 +270,12 @@ export interface LiveTranscriptSegment {
   segmentId: string;
   callId?: string;
   text: string;
-  speaker: 'agent' | 'prospect' | 'rep' | 'unknown';
+  speaker: 'agent' | 'prospect' | 'rep' | 'unknown' | 'Agent' | 'Prospect';
   isFinal: boolean;
   timestamp: string;
   createdAt?: string;
+  speaker_source?: 'automatic' | 'manual';
+  is_manual?: boolean;
 }
 
 export type RecognitionStatus = 
@@ -346,6 +348,9 @@ export interface RealTimeCoachingInput {
   stageEvents?: Array<{ stageNumber: number; eventType: string; eventLabel?: string; timestamp?: string }>;
   stageNotes?: Record<number, string>;
   sourceSegmentId?: string;
+  isCorrectionRefresh?: boolean;
+  latestSpeaker?: string;
+  latestStatement?: string;
 }
 
 

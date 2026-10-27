@@ -71,6 +71,7 @@ interface FallbackTranscriptSegment {
   segment_id: string;
   text: string;
   speaker: string;
+  speaker_source?: string;
   is_final: boolean;
   timestamp: string;
   created_at: string;
@@ -82,12 +83,15 @@ const fallbackReviews = new Map<string, any>();
 const fallbackTranscripts = new Map<string, FallbackTranscriptSegment[]>();
 
 function toFrontendTranscriptSegment(row: any) {
+  const speakerSource = String(row.speaker_source || (row.is_manual ? 'manual' : 'automatic'));
   return {
     id: String(row.id || row.segment_id),
     callId: String(row.call_id || ''),
     segmentId: String(row.segment_id || row.id || ''),
     text: String(row.text || ''),
     speaker: String(row.speaker || 'unknown'),
+    speaker_source: speakerSource,
+    is_manual: speakerSource === 'manual' || Boolean(row.is_manual),
     isFinal: row.is_final !== undefined ? Boolean(row.is_final) : true,
     timestamp: String(row.timestamp || row.created_at || new Date().toISOString()),
     createdAt: String(row.created_at || new Date().toISOString()),
@@ -898,10 +902,13 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
       // Upsert into in-memory fallback list to prevent duplicate segments
       const existingIdx = currentSegments.findIndex(s => s.segment_id === segmentId);
       if (existingIdx >= 0) {
+        // Requirement 5: Never overwrite a manually corrected speaker label with automatic stream
+        const isManual = currentSegments[existingIdx].speaker_source === 'manual';
         currentSegments[existingIdx] = {
           ...currentSegments[existingIdx],
           text,
-          speaker,
+          speaker: isManual ? currentSegments[existingIdx].speaker : speaker,
+          speaker_source: isManual ? 'manual' : String(seg.speaker_source || 'automatic'),
           is_final: isFinal,
           timestamp,
         };
@@ -920,6 +927,97 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
     res.status(500).json({ success: false, error: err?.message || 'Failed to persist transcript segment' });
   }
 });
+
+// ============================================================================
+// SPEAKER CORRECTION API (PATCH /api/calls/:id/transcript/:segmentId/speaker)
+// ============================================================================
+const handleSpeakerCorrection = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const supabase = req.supabase;
+    const callId = String(req.params.id);
+    const segmentId = String(req.params.segmentId);
+    const body = req.body || {};
+    const rawSpeaker = typeof body.speaker === 'string' ? body.speaker.trim() : '';
+
+    if (!rawSpeaker) {
+      res.status(400).json({ success: false, error: 'A valid speaker string (Agent or Prospect) is required.' });
+      return;
+    }
+
+    const lower = rawSpeaker.toLowerCase();
+    if (lower !== 'agent' && lower !== 'prospect' && lower !== 'rep') {
+      res.status(400).json({ success: false, error: `Invalid speaker "${rawSpeaker}". Must be "Agent" or "Prospect".` });
+      return;
+    }
+
+    const normalizedSpeaker = lower === 'agent' || lower === 'rep' ? 'agent' : 'prospect';
+
+    let updatedRecord: any = null;
+
+    // 1. Update in-memory fallbackTranscripts for this call
+    const currentList = fallbackTranscripts.get(callId) || [];
+    const existingIndex = currentList.findIndex(s => s.segment_id === segmentId || s.id === segmentId);
+    if (existingIndex >= 0) {
+      currentList[existingIndex] = {
+        ...currentList[existingIndex],
+        speaker: normalizedSpeaker,
+        speaker_source: 'manual',
+      };
+      fallbackTranscripts.set(callId, currentList);
+      updatedRecord = currentList[existingIndex];
+    }
+
+    // 2. Persist to Supabase if available
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('call_transcript_segments')
+          .update({
+            speaker: normalizedSpeaker,
+            speaker_source: 'manual',
+          })
+          .eq('call_id', callId)
+          .or(`segment_id.eq.${segmentId},id.eq.${segmentId}`)
+          .select()
+          .maybeSingle();
+
+        if (!error && data) {
+          updatedRecord = data;
+        } else if (error) {
+          // If speaker_source column doesn't exist yet in database, fallback to updating speaker only
+          const retry = await supabase
+            .from('call_transcript_segments')
+            .update({ speaker: normalizedSpeaker })
+            .eq('call_id', callId)
+            .or(`segment_id.eq.${segmentId},id.eq.${segmentId}`)
+            .select()
+            .maybeSingle();
+
+          if (retry.data) {
+            updatedRecord = { ...retry.data, speaker_source: 'manual' };
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Database error while updating speaker label:', dbErr);
+      }
+    }
+
+    if (!updatedRecord) {
+      res.status(404).json({ success: false, error: 'Transcript segment not found for this call.' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: toFrontendTranscriptSegment(updatedRecord),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update transcript segment speaker' });
+  }
+};
+
+callsRouter.patch('/:id/transcript/:segmentId/speaker', handleSpeakerCorrection);
+callsRouter.patch('/:id/transcripts/:segmentId/speaker', handleSpeakerCorrection);
 
 // POST /api/calls/:id/review - Generate & save Gemini AI post-call review
 callsRouter.post('/:id/review', async (req: AuthenticatedRequest, res: Response): Promise<void> => {

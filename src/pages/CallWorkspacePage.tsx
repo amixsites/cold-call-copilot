@@ -143,10 +143,17 @@ export const CallWorkspacePage: React.FC = () => {
   const [coachingError, setCoachingError] = useState<string | null>(null);
   const [coachingLastUpdated, setCoachingLastUpdated] = useState<string | null>(null);
   const [coachingCooldown, setCoachingCooldown] = useState<boolean>(false);
+  const [coachingStatusMessage, setCoachingStatusMessage] = useState<string | null>(null);
   const coachingRequestIdRef = useRef<number>(0);
   const coachingDebounceTimerRef = useRef<any>(null);
   const lastProcessedTranscriptIdRef = useRef<string | null>(null);
-  const fetchRealTimeCoachingRef = useRef<((options?: { force?: boolean; triggerSegment?: LiveTranscriptSegment }) => Promise<void>) | null>(null);
+  const fetchRealTimeCoachingRef = useRef<((options?: {
+    force?: boolean;
+    triggerSegment?: LiveTranscriptSegment;
+    customSegments?: LiveTranscriptSegment[];
+    isCorrectionRefresh?: boolean;
+    statusMessage?: string;
+  }) => Promise<void>) | null>(null);
   // Live Speech Recognition & Transcript State
   const [transcriptSegments, setTranscriptSegments] = useState<LiveTranscriptSegment[]>([]);
   const [interimTranscript, setInterimTranscript] = useState<string>('');
@@ -353,17 +360,24 @@ export const CallWorkspacePage: React.FC = () => {
   const triggerDebouncedAiRefresh = useCallback(() => {}, []);
 
   // Real-Time AI Coaching fetcher
-  const fetchRealTimeCoaching = useCallback(async (options?: { force?: boolean; triggerSegment?: LiveTranscriptSegment }) => {
+  const fetchRealTimeCoaching = useCallback(async (options?: {
+    force?: boolean;
+    triggerSegment?: LiveTranscriptSegment;
+    customSegments?: LiveTranscriptSegment[];
+    isCorrectionRefresh?: boolean;
+    statusMessage?: string;
+  }) => {
     const currentCallId = activeCallId || activeCallIdRef.current;
     if (!currentCallId) return;
 
-    // Rate limiting cooldown check unless forced by user click
+    // Rate limiting cooldown check unless forced by user click or speaker correction
     if (!options?.force && coachingCooldown) {
       return;
     }
 
     const requestId = ++coachingRequestIdRef.current;
     setIsLoadingCoaching(true);
+    setCoachingStatusMessage(options?.statusMessage || 'Analyzing');
     setCoachingError(null);
 
     // Apply 2.5s cooldown to prevent flood
@@ -374,7 +388,9 @@ export const CallWorkspacePage: React.FC = () => {
       const currentStageDef = getStageConfig(activeStage);
       const stageName = currentStageDef?.name || `Stage ${activeStage}`;
 
-      const recentHistory = transcriptSegments.slice(-8);
+      // Use customSegments if provided (e.g. 2-segment window on correction), otherwise recent 8
+      const recentHistory = options?.customSegments || transcriptSegments.slice(-8);
+      const latestSeg = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null;
 
       const result = await api.calls.requestCoaching(currentCallId, {
         callId: currentCallId,
@@ -391,12 +407,17 @@ export const CallWorkspacePage: React.FC = () => {
           text: s.text,
           timestamp: s.timestamp,
           segmentId: s.segmentId || s.id,
+          speaker_source: s.speaker_source,
+          is_manual: s.is_manual,
         })),
+        latestStatement: latestSeg?.text,
+        latestSpeaker: latestSeg?.speaker,
+        isCorrectionRefresh: Boolean(options?.isCorrectionRefresh),
         stageEvents: stageEvents.filter(e => e.stageNumber === activeStage),
         stageNotes,
         prospectWords,
         quoteStatus,
-        sourceSegmentId: options?.triggerSegment?.segmentId || options?.triggerSegment?.id,
+        sourceSegmentId: options?.triggerSegment?.segmentId || options?.triggerSegment?.id || latestSeg?.segmentId || latestSeg?.id,
       });
 
       // Guard against stale asynchronous responses
@@ -413,6 +434,7 @@ export const CallWorkspacePage: React.FC = () => {
     } finally {
       if (requestId === coachingRequestIdRef.current) {
         setIsLoadingCoaching(false);
+        setCoachingStatusMessage(null);
       }
     }
   }, [
@@ -424,6 +446,8 @@ export const CallWorkspacePage: React.FC = () => {
     transcriptSegments,
     stageNotes,
     stageEvents,
+    prospectWords,
+    quoteStatus,
   ]);
 
   // Keep ref up to date
@@ -488,6 +512,12 @@ export const CallWorkspacePage: React.FC = () => {
     const targetCallId = activeCallId || activeCallIdRef.current || segment.callId;
 
     setTranscriptSegments(prev => {
+      // Requirement 5: If segment already exists and has been manually corrected, preserve it
+      const existing = prev.find(s => s.segmentId === segment.segmentId || s.id === segment.segmentId);
+      if (existing && (existing.speaker_source === 'manual' || existing.is_manual)) {
+        return prev;
+      }
+
       // Prevent duplicate segments by segmentId or identical text within 3s
       if (prev.some(s => s.segmentId === segment.segmentId || (s.text.trim().toLowerCase() === segment.text.trim().toLowerCase() && Math.abs(new Date(s.timestamp).getTime() - new Date(segment.timestamp).getTime()) < 3000))) {
         return prev;
@@ -606,12 +636,69 @@ export const CallWorkspacePage: React.FC = () => {
     setTimeout(() => setSaveSuccessMessage(null), 2500);
   }, [activeStage, quoteStatus, stageEvents, persistCallState, fetchSuggestions]);
 
-  // Toggle speaker on a segment
+  // Toggle speaker on a segment with immediate UI update, DB persistence, and AI coaching refresh
   const handleToggleSpeaker = useCallback((segmentId: string, nextSpeaker: 'agent' | 'prospect' | 'rep' | 'unknown') => {
-    setTranscriptSegments(prev =>
-      prev.map(s => (s.id === segmentId || s.segmentId === segmentId ? { ...s, speaker: nextSpeaker } : s))
-    );
-  }, []);
+    const targetCallId = activeCallId || activeCallIdRef.current;
+    let nextSegments: LiveTranscriptSegment[] = [];
+    let correctedIdx = -1;
+    let correctedSegment: LiveTranscriptSegment | null = null;
+
+    // 1. Immediately update local UI state with manual speaker marker
+    setTranscriptSegments(prev => {
+      nextSegments = prev.map((s, idx) => {
+        if (s.id === segmentId || s.segmentId === segmentId) {
+          correctedIdx = idx;
+          const updated = {
+            ...s,
+            speaker: nextSpeaker as any,
+            speaker_source: 'manual' as const,
+            is_manual: true,
+          };
+          correctedSegment = updated;
+          return updated;
+        }
+        return s;
+      });
+      return nextSegments;
+    });
+
+    // 2. Persist corrected speaker label to backend/database
+    if (targetCallId) {
+      api.calls.updateTranscriptSpeaker(targetCallId, segmentId, nextSpeaker).catch(err => {
+        console.warn('Failed to persist speaker correction to backend:', err);
+      });
+    }
+
+    // 3. Re-analyze the two most recent finalized transcript segments including corrected segment
+    // Section 2: If corrected segment is within the last 2 segments, send last 2 finalized segments.
+    // If older, include 2 most recent ending at corrected segment plus immediately following segment.
+    const allSegments = nextSegments.length > 0 ? nextSegments : transcriptSegments;
+    const finalIdx = correctedIdx >= 0
+      ? correctedIdx
+      : allSegments.findIndex(s => s.id === segmentId || s.segmentId === segmentId);
+
+    let contextSegments: LiveTranscriptSegment[] = [];
+    if (allSegments.length <= 2) {
+      contextSegments = allSegments;
+    } else if (finalIdx >= allSegments.length - 2) {
+      contextSegments = allSegments.slice(-2);
+    } else {
+      const startIdx = Math.max(0, finalIdx - 1);
+      const endIdx = Math.min(allSegments.length, finalIdx + 2);
+      contextSegments = allSegments.slice(startIdx, endIdx);
+    }
+
+    // 4. Trigger fresh coaching suggestion
+    if (fetchRealTimeCoachingRef.current) {
+      fetchRealTimeCoachingRef.current({
+        force: true,
+        customSegments: contextSegments,
+        triggerSegment: correctedSegment || undefined,
+        isCorrectionRefresh: true,
+        statusMessage: 'Re-analyzing conversation...',
+      });
+    }
+  }, [activeCallId, transcriptSegments]);
 
   // Clear live transcript segments
   const handleClearTranscript = useCallback(() => {
@@ -1545,6 +1632,7 @@ export const CallWorkspacePage: React.FC = () => {
                 activeStageName={currentStageConfig.shortName}
                 lastUpdated={coachingLastUpdated}
                 refreshCooldown={coachingCooldown}
+                statusMessage={coachingStatusMessage || undefined}
                 className="flex-1 min-h-0"
               />
             )}
@@ -1625,6 +1713,7 @@ export const CallWorkspacePage: React.FC = () => {
                     activeStageName={currentStageConfig.shortName}
                     lastUpdated={coachingLastUpdated}
                     refreshCooldown={coachingCooldown}
+                    statusMessage={coachingStatusMessage || undefined}
                     isMobileDrawer={true}
                     onCloseMobileDrawer={() => setIsMobileAiOpen(false)}
                     className="h-full"

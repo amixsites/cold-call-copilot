@@ -203,6 +203,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(segment),
       }),
+    updateTranscriptSpeaker: (callId: string, segmentId: string, speaker: string) =>
+      request<LiveTranscriptSegment>(`/api/calls/${callId}/transcript/${segmentId}/speaker`, {
+        method: 'PATCH',
+        body: JSON.stringify({ speaker }),
+      }),
   },
 
   // AI Assistant API

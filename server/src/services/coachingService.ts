@@ -30,6 +30,8 @@ export interface CoachingInput {
     timestamp?: string;
     segmentId?: string;
     id?: string;
+    speaker_source?: string;
+    is_manual?: boolean;
   }>;
   prospectWords?: string;
   quoteStatus?: string;
@@ -41,6 +43,7 @@ export interface CoachingInput {
   }>;
   stageNotes?: Record<string | number, string>;
   sourceSegmentId?: string;
+  isCorrectionRefresh?: boolean;
 }
 
 export interface CoachingSuggestion {
@@ -113,6 +116,9 @@ export function generateFallbackCoaching(input: CoachingInput): CoachingSuggesti
   // Look at the latest statement across recentSegments, latestStatement, or prospectWords
   const recent = input.recentSegments || [];
   const latestSegment = recent.length > 0 ? recent[recent.length - 1] : null;
+  const rawSpeaker = (latestSegment?.speaker || input.latestSpeaker || '').toLowerCase();
+  const latestSpeaker = rawSpeaker === 'agent' || rawSpeaker === 'rep' ? 'agent' : rawSpeaker === 'prospect' ? 'prospect' : 'unknown';
+
   const latestText = (
     latestSegment?.text || 
     input.latestStatement || 
@@ -131,8 +137,15 @@ export function generateFallbackCoaching(input: CoachingInput): CoachingSuggesti
   const contact = input.contactName || input.prospectInfo?.contactName;
   const industry = input.industry || input.prospectInfo?.industry || 'manufacturing';
 
-  // Detect common manufacturing objections or hesitation
-  if (
+  // Section 4 consistency check: When the latest statement was spoken by the Agent,
+  // do NOT attribute agent statements to the prospect and do NOT fabricate prospect objections!
+  if (latestSpeaker === 'agent') {
+    detectedIntent = 'Agent speaking / Waiting for prospect response';
+    objection = null;
+    suggestedResponse = 'Allow the prospect a moment to respond, or ask: "Does that align with how your shop currently operates?"';
+    followUpQuestion = 'Does that align with how your shop currently manages that process?';
+    recommendedAction = 'Pause to let the prospect answer before pitching additional details or next steps.';
+  } else if (
     latestText.includes('another provider') || 
     latestText.includes('current vendor') || 
     latestText.includes('already have') || 
@@ -296,6 +309,9 @@ export async function generateRealTimeCoaching(input: CoachingInput): Promise<Co
       : 'No live speech captured yet.';
 
     const latestSegment = recent.length > 0 ? recent[recent.length - 1] : null;
+    const rawLatestSpeaker = (latestSegment?.speaker || input.latestSpeaker || '').toLowerCase();
+    const latestSpeaker = rawLatestSpeaker === 'agent' || rawLatestSpeaker === 'rep' ? 'Agent' : rawLatestSpeaker === 'prospect' ? 'Prospect' : 'Unknown';
+
     const latestProspectStatement = latestSegment?.speaker === 'prospect'
       ? `"${latestSegment.text}"`
       : (input.prospectWords ? `"${input.prospectWords}"` : 'None');
@@ -313,19 +329,32 @@ export async function generateRealTimeCoaching(input: CoachingInput): Promise<Co
 - Stage Goal: ${STAGE_OBJECTIVES[stage]?.goal || 'Engage prospect effectively'}
 - Call Objective: ${input.callObjective || 'Manufacturing discovery'}
 - Latest Prospect Statement: ${latestProspectStatement}
+- Most Recent Statement Spoken By: ${latestSpeaker}
+${input.isCorrectionRefresh ? '- Context Update: The user just manually corrected speaker attribution. Analyze the conversation under the corrected labels.' : ''}
 
-=== RECENT CONVERSATION TRANSCRIPT (LAST FEW TURNS) ===
+=== RECENT CONVERSATION TRANSCRIPT (AUTHORITATIVE SPEAKER LABELS) ===
 ${transcriptHistory}
 
-=== STRICT COACHING GUIDELINES ===
-1. Generate ONE concise sentence the sales rep can speak next ("suggested_response"). It must sound natural, conversational, polite, and directly address what was just said.
-2. Detect the prospect's likely intent ("detected_intent").
-3. Detect any objection raised ("objection"). If none, use null.
-4. Detect any buying signals ("buying_signals", array of strings). If none, empty array.
-5. Provide ONE relevant follow-up question ("follow_up_question") that keeps the conversation moving forward without being pushy.
-6. Provide ONE practical action recommendation ("recommended_action").
-7. Output confidence as a decimal between 0.50 and 0.99.
-8. NEVER invent fictional product specs, false pricing, or unapproved claims. Ground your response strictly in the manufacturing context provided.
+=== AUTHORITATIVE SPEAKER & COACHING GUIDELINES ===
+1. SPEAKER GROUNDING:
+   - The speaker labels in the transcript above (Agent vs Prospect) are authoritative.
+   - The latest statement was spoken by: ${latestSpeaker}.
+   - NEVER attribute an Agent's statement to the Prospect, and NEVER attribute a Prospect's statement to the Agent.
+   - If the latest speaker is the Agent, the caller has just spoken and is waiting for the prospect's answer. Suggest giving the prospect room to reply or asking a brief neutral check-in question. Do NOT hallucinate objections or buying signals.
+   - If the latest speaker is the Prospect, directly acknowledge their statement or objection.
+2. EVIDENCE & RESTRAINT:
+   - Treat 2-segment context as limited evidence.
+   - Do NOT claim buying signals or confirmed objections unless explicitly backed by the prospect's exact words.
+   - If context or intent remains ambiguous, generate a neutral clarification question.
+3. OUTPUT REQUIREMENTS:
+   - Generate ONE concise sentence the sales rep can speak next ("suggested_response"). It must sound natural, conversational, polite, and directly address what was just said.
+   - Detect the prospect's likely intent ("detected_intent").
+   - Detect any objection raised ("objection"). If none, use null.
+   - Detect any buying signals ("buying_signals", array of strings). If none, empty array.
+   - Provide ONE relevant follow-up question ("follow_up_question") that keeps the conversation moving forward without being pushy.
+   - Provide ONE practical action recommendation ("recommended_action").
+   - Output confidence as a decimal between 0.50 and 0.99.
+   - NEVER invent fictional product specs, false pricing, or unapproved claims. Ground your response strictly in the manufacturing context provided (±0.0002" tolerances, Haas 5-axis CNC, 14-day turns).
 
 Respond ONLY with a valid JSON object matching this schema:
 {
