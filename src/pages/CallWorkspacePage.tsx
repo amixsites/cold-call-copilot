@@ -1655,6 +1655,12 @@ export const CallWorkspacePage: React.FC = () => {
               pauseThreshold={speakerPauseThreshold}
               onPauseThresholdChange={handlePauseThresholdChange}
               isSpeakerSwitchPending={isSpeakerSwitchPending}
+              callId={activeCallId || undefined}
+              companyName={selectedProspect?.companyName || 'Prospect'}
+              contactName={selectedProspect?.contactName}
+              callNotes={Object.entries(stageNotes).map(([s, n]) => `[Stage ${s}] ${n}`).join('\n\n')}
+              callOutcome={outcome}
+              durationSeconds={elapsedSeconds}
             />
           </div>
         </div>

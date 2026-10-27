@@ -15,8 +15,10 @@ import {
   WifiOff,
   ChevronDown,
   ArrowLeftRight,
+  Download,
 } from 'lucide-react';
 import { LiveTranscriptSegment, RecognitionStatus } from '../../types';
+import { downloadTranscriptAsTxt } from '../../lib/transcriptExport';
 // gemini-3.5-transcribe-live streaming pipeline via GeminiLiveAudioClient
 
 interface LiveTranscriptPanelProps {
@@ -34,6 +36,14 @@ interface LiveTranscriptPanelProps {
   pauseThreshold?: number;
   onPauseThresholdChange?: (seconds: number) => void;
   isSpeakerSwitchPending?: boolean;
+  onDownloadTranscript?: () => void;
+  callId?: string;
+  companyName?: string;
+  contactName?: string;
+  callNotes?: string;
+  callOutcome?: string;
+  durationSeconds?: number;
+  callDate?: string;
 }
 
 export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
@@ -46,12 +56,42 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
   onSetAsProspectWords,
   onToggleSpeaker,
   onClearTranscript,
+  onDownloadTranscript,
+  callId = '',
+  companyName = 'Prospect',
+  contactName,
+  callNotes,
+  callOutcome,
+  durationSeconds,
+  callDate,
   className = '',
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showScrollBottomButton, setShowScrollBottomButton] = useState(false);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+
+  const handleDownload = () => {
+    if (onDownloadTranscript) {
+      onDownloadTranscript();
+      return;
+    }
+    const res = downloadTranscriptAsTxt({
+      callId: callId || 'call-session',
+      companyName: companyName || 'Prospect',
+      contactName,
+      callDate: callDate || new Date().toISOString(),
+      durationSeconds,
+      segments,
+      notes: callNotes,
+      outcome: callOutcome,
+    });
+    if (!res.success && res.message) {
+      setDownloadNotice(res.message);
+      setTimeout(() => setDownloadNotice(null), 3500);
+    }
+  };
 
   // Smart auto-scroll: monitor user scroll position
   // If user is within 60px of the bottom, user is actively following
@@ -189,8 +229,23 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
           </div>
         </div>
 
-        {/* Start / Stop Listening & Clear Controls */}
+        {/* Start / Stop Listening, Download & Clear Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            id="download-transcript-btn"
+            onClick={handleDownload}
+            title={segments.length === 0 ? "No transcript segments recorded yet" : "Download Transcript (.txt)"}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold transition-all border shadow-3xs cursor-pointer ${
+              segments.length > 0
+                ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'
+            }`}
+          >
+            <Download className="w-3.5 h-3.5 text-slate-600" />
+            <span className="hidden sm:inline">Download</span>
+          </button>
+
           {segments.length > 0 && onClearTranscript && (
             <button
               type="button"
@@ -231,6 +286,16 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Download Alert Notice */}
+      {downloadNotice && (
+        <div className="p-2 bg-amber-50 border-b border-amber-200 flex items-start gap-2 text-amber-800 text-xs animate-in fade-in duration-150">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 text-[11px]">
+            <span>{downloadNotice}</span>
+          </div>
+        </div>
+      )}
 
       {/* Error Notice (if mic permission denied or device error) */}
       {errorMessage && (

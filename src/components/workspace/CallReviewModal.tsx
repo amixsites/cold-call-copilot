@@ -14,10 +14,12 @@ import {
   Target,
   ArrowRight,
   TrendingUp,
+  Download,
 } from 'lucide-react';
 import { CallStageNumber, EndingReason, CallOutcome, CallAiReview, LiveTranscriptSegment } from '../../types';
 import { formatDuration } from '../../lib/dateUtils';
 import { api } from '../../lib/api';
+import { downloadTranscriptAsTxt } from '../../lib/transcriptExport';
 
 interface CallReviewModalProps {
   isOpen: boolean;
@@ -180,6 +182,23 @@ export const CallReviewModal: React.FC<CallReviewModalProps> = ({
       setErrorMessage(`Failed to save draft: ${err.message}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDownloadTranscript = () => {
+    const res = downloadTranscriptAsTxt({
+      callId,
+      companyName,
+      contactName,
+      callDate: new Date().toISOString(),
+      durationSeconds,
+      segments: transcriptSegments,
+      notes: review?.callSummary ? `[AI Review Summary] ${review.callSummary}` : prospectWords,
+      outcome: selectedOutcome,
+    });
+    if (!res.success && res.message) {
+      setErrorMessage(res.message);
+      setTimeout(() => setErrorMessage(null), 3500);
     }
   };
 
@@ -558,14 +577,24 @@ export const CallReviewModal: React.FC<CallReviewModalProps> = ({
 
         {/* Modal Footer Controls */}
         <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSaving || isGenerating}
-            className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-lg transition-colors cursor-pointer shadow-3xs"
-          >
-            Return to Call
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadTranscript}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors cursor-pointer shadow-3xs"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-600" />
+              <span>Download Transcript (.txt)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isSaving || isGenerating}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-lg transition-colors cursor-pointer shadow-3xs"
+            >
+              Return to Call
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             {review && (

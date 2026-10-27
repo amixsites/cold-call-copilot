@@ -422,8 +422,12 @@ callsRouter.post('/', async (req: AuthenticatedRequest, res: Response): Promise<
         const { data, error } = await supabase.from('calls').insert(insertData).select().single();
         if (!error && data) {
           savedCall = data;
+        } else if (error) {
+          console.error('[Supabase Insert Call Error]:', error.message || error);
         }
-      } catch (_) {}
+      } catch (dbErr: any) {
+        console.error('[Supabase Insert Call Exception]:', dbErr.message || dbErr);
+      }
     }
 
     if (!savedCall) {
@@ -524,8 +528,12 @@ callsRouter.patch('/:id', async (req: AuthenticatedRequest, res: Response): Prom
 
         if (!error && data) {
           updatedCall = data;
+        } else if (error) {
+          console.error('[Supabase Update Call Error]:', error.message || error);
         }
-      } catch (_) {}
+      } catch (dbErr: any) {
+        console.error('[Supabase Update Call Exception]:', dbErr.message || dbErr);
+      }
     }
 
     // Update in-memory fallback
@@ -700,8 +708,12 @@ callsRouter.post('/:id/events', async (req: AuthenticatedRequest, res: Response)
 
         if (!error && data) {
           savedEvent = data;
+        } else if (error) {
+          console.error('[Supabase Insert Event Error]:', error.message || error);
         }
-      } catch (_) {}
+      } catch (dbErr: any) {
+        console.error('[Supabase Insert Event Exception]:', dbErr.message || dbErr);
+      }
     }
 
     // Persist to fallback store
@@ -878,6 +890,7 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
                 segment_id: segmentId,
                 text,
                 speaker,
+                speaker_source: seg.speaker_source || 'automatic',
                 is_final: isFinal,
                 timestamp,
                 created_at: nowIso,
@@ -890,9 +903,11 @@ callsRouter.post('/:id/transcript', async (req: AuthenticatedRequest, res: Respo
           if (!error && data) {
             savedSegments.push(toFrontendTranscriptSegment(data));
           } else {
+            if (error) console.error('[Supabase Upsert Transcript Error]:', error.message || error);
             savedSegments.push(toFrontendTranscriptSegment(newSegmentRecord));
           }
-        } catch (_) {
+        } catch (dbErr: any) {
+          console.error('[Supabase Upsert Transcript Exception]:', dbErr.message || dbErr);
           savedSegments.push(toFrontendTranscriptSegment(newSegmentRecord));
         }
       } else {

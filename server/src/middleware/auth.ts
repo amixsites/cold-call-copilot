@@ -78,8 +78,11 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   // Gracefully attach demo user context without blocking with auth errors
   req.user = defaultDemoUser;
   req.token = token || 'demo_token';
-  if (config.supabaseAnonKey) {
-    req.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+
+  // Use service role key on backend to ensure persistent database operations
+  const activeKey = config.supabaseServiceRoleKey || config.supabaseAnonKey;
+  if (activeKey) {
+    req.supabase = createClient(config.supabaseUrl, activeKey, {
       auth: { persistSession: false },
       realtime: { transport: WebSocket as any },
     });

@@ -193,7 +193,12 @@ prospectsRouter.post('/', async (req: AuthenticatedRequest, res: Response): Prom
           res.status(201).json({ success: true, data: toFrontendProspect(data) });
           return;
         }
-      } catch (_) {}
+        if (error) {
+          console.error('[Supabase Insert Prospect Error]:', error.message || error);
+        }
+      } catch (dbErr: any) {
+        console.error('[Supabase Insert Prospect Exception]:', dbErr.message || dbErr);
+      }
     }
 
     // Save in resilient fallback store

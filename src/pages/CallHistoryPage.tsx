@@ -17,7 +17,8 @@ import {
   HelpCircle,
   ShieldAlert,
   Save,
-  X
+  X,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -27,6 +28,8 @@ import { Modal } from '../components/common/Modal';
 import { CallRecord, CallOutcome } from '../types';
 import { useData } from '../context/DataContext';
 import { formatDuration, formatDisplayDate } from '../lib/dateUtils';
+import { api } from '../lib/api';
+import { downloadTranscriptAsTxt } from '../lib/transcriptExport';
 
 export const CallHistoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -116,6 +119,35 @@ export const CallHistoryPage: React.FC = () => {
     setIsEditingNotes(false);
     setEditSuccessMsg('Call notes updated successfully.');
     setTimeout(() => setEditSuccessMsg(null), 3000);
+  };
+
+  const [downloadMsg, setDownloadMsg] = useState<string | null>(null);
+
+  const handleDownloadHistoryTranscript = async () => {
+    if (!viewingCall) return;
+    try {
+      const segments = await api.calls.getTranscript(viewingCall.id);
+      if (!segments || segments.length === 0) {
+        setDownloadMsg('No transcript segments recorded for this call session.');
+        setTimeout(() => setDownloadMsg(null), 3500);
+        return;
+      }
+      downloadTranscriptAsTxt({
+        callId: viewingCall.id,
+        companyName: viewingCall.companyName,
+        contactName: viewingCall.contactName,
+        callDate: viewingCall.callDate,
+        durationSeconds: viewingCall.durationSeconds,
+        segments,
+        notes: viewingCall.notes || viewingCall.businessProblemNotes,
+        outcome: viewingCall.outcome,
+      });
+      setDownloadMsg('Transcript downloaded successfully!');
+      setTimeout(() => setDownloadMsg(null), 3000);
+    } catch (err: any) {
+      setDownloadMsg(`Failed to load transcript: ${err.message || 'Network error'}`);
+      setTimeout(() => setDownloadMsg(null), 3500);
+    }
   };
 
   const linkedFollowUps = viewingCall ? followUps.filter(f => f.callId === viewingCall.id) : [];
@@ -430,6 +462,14 @@ export const CallHistoryPage: React.FC = () => {
                     <Button
                       variant="outline"
                       size="sm"
+                      icon={<Download className="h-3.5 w-3.5" />}
+                      onClick={handleDownloadHistoryTranscript}
+                    >
+                      Download Transcript
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       icon={<Edit3 className="h-3.5 w-3.5" />}
                       onClick={() => setIsEditingNotes(true)}
                     >
@@ -449,6 +489,12 @@ export const CallHistoryPage: React.FC = () => {
           }
         >
           <div className="space-y-5 text-sm">
+            {downloadMsg && (
+              <div className="p-3 bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-800 rounded-lg flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+                <span>{downloadMsg}</span>
+              </div>
+            )}
             {editSuccessMsg && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 rounded-lg flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />

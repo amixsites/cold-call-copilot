@@ -13,6 +13,7 @@ const port = parseInt(process.env.PORT || '3001', 10);
 const nodeEnv = process.env.NODE_ENV || 'development';
 const supabaseUrl = process.env.SUPABASE_URL || 'https://rduxyhkwgykejczxircd.supabase.co';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const rawCors = process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173';
 const corsOrigins = rawCors.split(',').map(s => s.trim()).filter(Boolean);
@@ -28,6 +29,7 @@ export const config = {
   nodeEnv,
   supabaseUrl,
   supabaseAnonKey,
+  supabaseServiceRoleKey,
   geminiApiKey,
   geminiModel,
   corsOrigins,

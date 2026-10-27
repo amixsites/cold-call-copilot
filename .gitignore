@@ -16,6 +16,9 @@ dist/
 dist-ssr/
 server/dist/
 .vercel/
+scratch/
+supabase/.temp/
+cold-call-transcript-*.txt
 
 # Environment and Secret Files (NEVER COMMIT SENSITIVE KEYS)
 .env
