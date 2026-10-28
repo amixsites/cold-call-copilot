@@ -27,13 +27,20 @@ app.use((_req, res, next) => {
   next();
 });
 
-// 2. CORS Policy restricted to configured origins
+// 2. CORS Policy restricted to configured origins and Vercel domains
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. mobile apps, curl, or same-origin in some environments)
+      // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
-      if (config.corsOrigins.includes(origin) || !config.isProduction) {
+      const isAllowed = 
+        config.corsOrigins.includes(origin) || 
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        !config.isProduction;
+
+      if (isAllowed) {
         return callback(null, true);
       }
       return callback(new Error(`CORS policy violation: Origin ${origin} not allowed`));

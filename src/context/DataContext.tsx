@@ -139,27 +139,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setApiError(null);
 
     try {
-      const [prospectsData, callsData, followUpsData] = await Promise.all([
-        api.prospects.getAll().catch(() => []),
-        api.calls.getAll().catch(() => []),
-        api.followups.getAll().catch(() => []),
+      const [prospectsRes, callsRes, followUpsRes] = await Promise.allSettled([
+        api.prospects.getAll(),
+        api.calls.getAll(),
+        api.followups.getAll(),
       ]);
 
-      setProspects(Array.isArray(prospectsData) ? prospectsData : []);
-      setCalls(Array.isArray(callsData) ? callsData : []);
-      setFollowUps(Array.isArray(followUpsData) ? followUpsData : []);
+      const errors: string[] = [];
+      let currentCalls: CallRecord[] = [];
+
+      if (prospectsRes.status === 'fulfilled') {
+        setProspects(Array.isArray(prospectsRes.value) ? prospectsRes.value : []);
+      } else {
+        const msg = prospectsRes.reason?.message || 'Failed to fetch prospects';
+        errors.push(msg);
+        console.warn('[DataContext] Prospects fetch failed:', msg);
+      }
+
+      if (callsRes.status === 'fulfilled') {
+        currentCalls = Array.isArray(callsRes.value) ? callsRes.value : [];
+        setCalls(currentCalls);
+      } else {
+        const msg = callsRes.reason?.message || 'Failed to fetch calls';
+        errors.push(msg);
+        console.warn('[DataContext] Calls fetch failed:', msg);
+      }
+
+      if (followUpsRes.status === 'fulfilled') {
+        setFollowUps(Array.isArray(followUpsRes.value) ? followUpsRes.value : []);
+      } else {
+        const msg = followUpsRes.reason?.message || 'Failed to fetch follow-ups';
+        errors.push(msg);
+        console.warn('[DataContext] Follow-ups fetch failed:', msg);
+      }
+
+      if (errors.length > 0) {
+        safeSetApiError(`Database connection error: ${errors[0]}`);
+      }
 
       // Authoritative call state restoration across page refreshes
       try {
         const storedActiveCallId = sessionStorage.getItem('ccc_active_call_id');
         if (storedActiveCallId) {
-          const verifiedActiveCall = (Array.isArray(callsData) ? callsData : []).find(
+          const verifiedActiveCall = currentCalls.find(
             c => c.id === storedActiveCallId && c.callStatus === 'In Progress'
           );
           if (verifiedActiveCall) {
             setActiveCallIdState(verifiedActiveCall.id);
             setCallLifecycleState('active');
-          } else {
+          } else if (callsRes.status === 'fulfilled') {
             sessionStorage.removeItem('ccc_active_call_id');
             setActiveCallIdState(null);
             setCallLifecycleState('idle');

@@ -270,9 +270,11 @@ callsRouter.get('/', async (req: AuthenticatedRequest, res: Response): Promise<v
         const { data, error } = await query;
         if (!error && data) {
           callsList = data;
+        } else if (error) {
+          console.error('[Supabase GET Calls Error]:', error.message || error);
         }
-      } catch (_) {
-        // Fallback to in-memory store
+      } catch (dbErr: any) {
+        console.error('[Supabase GET Calls Exception]:', dbErr?.message || dbErr);
       }
     }
 
@@ -301,7 +303,8 @@ callsRouter.get('/', async (req: AuthenticatedRequest, res: Response): Promise<v
 
     res.status(200).json({ success: true, data: results });
   } catch (err: any) {
-    res.status(200).json({ success: true, data: [] });
+    console.error('[API GET Calls Exception]:', err?.message || err);
+    res.status(500).json({ success: false, error: err?.message || 'Internal server error', data: [] });
   }
 });
 

@@ -26,7 +26,15 @@ import { useData } from '../context/DataContext';
 
 export const ProspectsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { prospects, addProspect, updateProspect, deleteProspect } = useData();
+  const { 
+    prospects, 
+    addProspect, 
+    updateProspect, 
+    deleteProspect, 
+    isLoadingData, 
+    apiError, 
+    refetchData 
+  } = useData();
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -188,10 +196,35 @@ export const ProspectsPage: React.FC = () => {
         </CardContent>
       </Card>
 
+      {apiError && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="text-sm font-semibold">Database Connection Issue</p>
+              <p className="text-xs text-amber-800">{apiError}</p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetchData()}
+            className="border-amber-300 text-amber-900 hover:bg-amber-100 shrink-0 self-start sm:self-center"
+          >
+            Retry Database Sync
+          </Button>
+        </div>
+      )}
+
       {/* Prospects Table Card */}
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          {filteredProspects.length === 0 ? (
+          {isLoadingData && prospects.length === 0 ? (
+            <div className="p-12 text-center flex flex-col items-center justify-center gap-3 text-slate-500">
+              <div className="h-6 w-6 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
+              <p className="text-sm font-medium">Fetching prospects from database...</p>
+            </div>
+          ) : filteredProspects.length === 0 ? (
             <div className="p-8">
               <EmptyState
                 icon={<Building2 className="h-8 w-8 text-slate-400" />}

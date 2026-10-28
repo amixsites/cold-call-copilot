@@ -74,9 +74,11 @@ prospectsRouter.get('/', async (req: AuthenticatedRequest, res: Response): Promi
         const { data, error } = await query;
         if (!error && data) {
           results = data.map(toFrontendProspect);
+        } else if (error) {
+          console.error('[Supabase GET Prospects Error]:', error.message || error);
         }
-      } catch (_) {
-        // Fallback to in-memory store if database query fails
+      } catch (dbErr: any) {
+        console.error('[Supabase GET Prospects Exception]:', dbErr?.message || dbErr);
       }
     }
 
@@ -103,7 +105,8 @@ prospectsRouter.get('/', async (req: AuthenticatedRequest, res: Response): Promi
     // Return real data (empty array [] when no prospects exist)
     res.status(200).json({ success: true, data: results });
   } catch (err: any) {
-    res.status(200).json({ success: true, data: [] });
+    console.error('[API GET Prospects Exception]:', err?.message || err);
+    res.status(500).json({ success: false, error: err?.message || 'Internal server error', data: [] });
   }
 });
 

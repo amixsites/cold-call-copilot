@@ -41,9 +41,13 @@ export function validateConfig() {
   const missing: string[] = [];
   if (!config.supabaseUrl) missing.push('SUPABASE_URL');
   if (!config.supabaseAnonKey && config.isProduction) missing.push('SUPABASE_ANON_KEY');
+  if (!config.supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
 
   if (missing.length > 0) {
     console.warn(`[Config Warning] Missing environment variables: ${missing.join(', ')}`);
+    if (missing.includes('SUPABASE_SERVICE_ROLE_KEY')) {
+      console.warn('[Config Warning] Without SUPABASE_SERVICE_ROLE_KEY, backend database queries will be subject to RLS and may return empty arrays for unauthenticated sessions.');
+    }
   }
 
   // Model enforcement validation & diagnostics (without logging secrets or audio)

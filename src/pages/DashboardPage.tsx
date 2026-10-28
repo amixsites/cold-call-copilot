@@ -41,7 +41,10 @@ export const DashboardPage: React.FC = () => {
   const { 
     calls, 
     followUps, 
-    metrics 
+    metrics,
+    isLoadingData,
+    apiError,
+    refetchData,
   } = useData();
 
   // 1. Calculate Eight-Stage Funnel Metrics strictly from actual persisted calls
@@ -193,6 +196,33 @@ export const DashboardPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {apiError && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="text-sm font-semibold">Database Connection Issue</p>
+              <p className="text-xs text-amber-800">{apiError}</p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetchData()}
+            className="border-amber-300 text-amber-900 hover:bg-amber-100 shrink-0 self-start sm:self-center"
+          >
+            Retry Database Sync
+          </Button>
+        </div>
+      )}
+
+      {isLoadingData && calls.length === 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-center gap-3 text-slate-600 text-sm">
+          <div className="h-4 w-4 border-2 border-slate-400 border-t-indigo-600 rounded-full animate-spin" />
+          <span>Synchronizing records with database...</span>
+        </div>
+      )}
 
       {/* Primary KPI Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

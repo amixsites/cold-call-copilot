@@ -45,7 +45,7 @@ async function getAccessToken(): Promise<string | null> {
   return 'demo_token_active_user';
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}, retries = 2): Promise<T> {
   const token = await getAccessToken();
 
   const headers: HeadersInit = {
@@ -66,6 +66,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       headers,
     });
   } catch (err: any) {
+    if (retries > 0 && (!options.method || options.method === 'GET')) {
+      // Backend may be waking up from sleep; retry after short delay
+      await new Promise(r => setTimeout(r, 2000));
+      return request<T>(endpoint, options, retries - 1);
+    }
     throw new ApiError(
       `Network connection to API server failed at ${url}. Please ensure backend is running.`,
       0,
